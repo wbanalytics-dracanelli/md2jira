@@ -2,7 +2,6 @@
 
 import os
 import shutil
-from dotenv import load_dotenv
 import re
 import tempfile
 from enum import Enum
@@ -13,43 +12,33 @@ import json
 import hashlib
 
 class MD2Jira:
-    def __init__(self, args): 
+    def __init__(self, config):
 
-        # Local environment supercedes .env file
-        load_dotenv(override=True)
+        self.config       = config
+        self.PROJECT_KEY  = config.project.project_key
 
-        subdomain         = os.environ.get('JIRA_PROJECT_SUBDOMAIN')
-        domain            = os.environ.get('JIRA_DOMAIN')
-        domain            = domain if domain is not None else 'atlassian.net'
-        checklist_field   = os.environ.get('JIRA_CHECKLIST_CUSTOMFIELD')
-
-        if hasattr(args, 'JIRA_PROJECT_KEY') and args.JIRA_PROJECT_KEY is not None:
-            self.PROJECT_KEY = args.JIRA_PROJECT_KEY
-        else:
-            self.PROJECT_KEY  = os.environ.get('JIRA_PROJECT_KEY')
-
-
-        self.args         = args
-        self.baseurl      = f'https://{subdomain}.{domain}/rest/api/2'
+        self.baseurl      = f'https://{config.instance.subdomain}.{config.instance.domain}/rest/api/2'
+        self.browse_url   = f'https://{config.instance.subdomain}.{config.instance.domain}/browse'
         self.http         = urllib3.PoolManager(ca_certs=certifi.where())
         self.epic_re      = re.compile(r'^#\s+')
         self.story_re     = re.compile(r'^##\s+')
         self.task_re      = re.compile(r'^##\s+')
         self.subtask_re   = re.compile(r'^###\s+')
         self.checklist_re = re.compile(r'^\* \[(.*)\] (.*)$')
-        self.epic_id      = ''
-        self.parent_id    = ''
+        self.parent_re    = re.compile(r'\s*\{parent:([A-Za-z]+-\d+)\}\s*$')
+        self.epic_id      = config.default_epic_key or ''
+        self.parent_id    = config.default_parent_key or ''
 
-        self.checklist_custom_field = os.environ.get('JIRA_CHECKLIST_CUSTOMFIELD')
+        self.checklist_custom_field = config.project.checklist_field
         self.checklist_enabled      = self.checklist_custom_field is not None
-        self.verbose                = getattr(args, 'verbose', False)
-        self.wba_team               = os.environ.get('JIRA_WBA_TEAM')
+        self.verbose                = config.verbose
+        self.dry_run                = config.dry_run
 
     def jira_http_call(self, url, verb='GET', body=''):
 
         req_headers={
             'Content-Type': 'application/json',
-            'Authorization': 'Basic {}'.format(os.environ.get('JIRA_AUTH_KEY'))
+            'Authorization': 'Basic {}'.format(os.environ.get(self.config.instance.auth_key_env))
         }
 
         if verb == 'GET' or verb == 'DELETE':
@@ -93,7 +82,7 @@ class MD2Jira:
                 created_issue.parent_id = issue.parent_id
             issue_key = json_loads['key']
             print (
-                f'Created issue {issue_key}: https://wbinsights.atlassian.net/browse/{issue_key}'
+                f'Created issue {issue_key}: {self.browse_url}/{issue_key}'
             )
             return created_issue
         return None
@@ -113,7 +102,7 @@ class MD2Jira:
                 json_loads['key'],
                 fields['summary'],
                 fields['description'],
-                fields[self.checklist_custom_field] if self.checklist_enabled else ''
+                fields.get(self.checklist_custom_field, '') if self.checklist_enabled else ''
             )
             return issue
         return None
@@ -147,14 +136,16 @@ class MD2Jira:
         summary_encoded = issue.summary.replace('!','\\\\!')
         summary_encoded = summary_encoded.replace('-','\\\\-')
         
-        # Build the fields list - only include checklist field if it's configured
-        fields = 'summary,description,priority,issuetype'
+        epic_link_field = self.config.project.epic_link_field
+
+        fetch_fields = 'summary,description,priority,issuetype,parent'
+        fetch_fields += f',{epic_link_field}'
         if self.checklist_custom_field:
-            fields += f',{self.checklist_custom_field}'
+            fetch_fields += f',{self.checklist_custom_field}'
             
         # Use API v3 search/jql endpoint (v2 has been deprecated)
         api_v3_base = self.baseurl.replace('/rest/api/2', '/rest/api/3')
-        url = f'{api_v3_base}/search/jql?jql=project={self.PROJECT_KEY}+AND+summary~"{summary_encoded.replace(" ", "+")}"&fields={fields}'
+        url = f'{api_v3_base}/search/jql?jql=project={self.PROJECT_KEY}+AND+summary~"{summary_encoded.replace(" ", "+")}"&fields={fetch_fields}'
         
         resp        = self.jira_http_call(url)
         json_loads  = json.loads(resp.data.decode('utf-8'))
@@ -200,40 +191,65 @@ class MD2Jira:
             elif description is None:
                 description = ''
                 
-            found_issue =  Issue(
+            found_issue = Issue(
                 issue_type,
                 key,
                 fields['summary'],
                 description,
                 checklist_data 
             )
+
+            parent_data = fields.get('parent')
+            if parent_data and isinstance(parent_data, dict) and 'key' in parent_data:
+                found_issue.parent_id = parent_data['key']
+
+            epic_link_data = fields.get(epic_link_field)
+            if epic_link_data:
+                found_issue.epic_id = epic_link_data
+
             return found_issue
         return None
 
+    def _extract_parent(self, text):
+        """Extract {parent:KEY} annotation from header text, return (parent_key, clean_text)."""
+        match = self.parent_re.search(text)
+        if match:
+            parent_key = match.group(1)
+            clean_text = self.parent_re.sub('', text).strip()
+            return parent_key, clean_text
+        return None, text
+
     def parse_markdown(self):
-        fh           = open(self.args.INFILE, 'r', encoding='utf-8')
+        fh           = open(self.config.infile, 'r', encoding='utf-8')
         lines        = fh.readlines()
         issues       = []
         issue_type   = IssueType.NONE
         parser_state = ParserState.DETECT_ISSUE
         summary      = None
+        explicit_parent = None
 
         for line in lines:
             stripped   = line.strip()
             issue_type = self.detect_issue(stripped)
+            explicit_parent = None
 
             if issue_type is IssueType.Epic:
-                summary = '{}'.format(re.sub(self.epic_re, '', stripped))
-                stripped = 'EPIC FOUND: {}'.format(re.sub(self.epic_re, '', stripped))
+                raw = re.sub(self.epic_re, '', stripped)
+                explicit_parent, summary = self._extract_parent(raw)
+                stripped = 'EPIC FOUND: {}'.format(summary)
             elif issue_type is IssueType.Task:
-                summary = '{}'.format(re.sub(self.task_re, '', stripped))
-                stripped = 'STORY FOUND: {}'.format(re.sub(self.task_re, '', stripped))
+                raw = re.sub(self.task_re, '', stripped)
+                explicit_parent, summary = self._extract_parent(raw)
+                stripped = 'STORY FOUND: {}'.format(summary)
             elif issue_type is IssueType.Subtask:
-                summary = '{}'.format(re.sub(self.subtask_re, '', stripped))
-                stripped = 'Subtask FOUND: {}'.format(re.sub(self.subtask_re, '', stripped))
+                raw = re.sub(self.subtask_re, '', stripped)
+                explicit_parent, summary = self._extract_parent(raw)
+                stripped = 'Subtask FOUND: {}'.format(summary)
 
             if parser_state is ParserState.DETECT_ISSUE and issue_type in [IssueType.Epic, IssueType.Task, IssueType.Subtask]:
-                issues.append(Issue(issue_type, '', summary))
+                new_issue = Issue(issue_type, '', summary)
+                new_issue.explicit_parent = explicit_parent
+                issues.append(new_issue)
                 parser_state = ParserState.COLLECT_DESCRIPTION
 
             elif parser_state is ParserState.COLLECT_DESCRIPTION:
@@ -251,7 +267,9 @@ class MD2Jira:
 
                 else:
                     self.process_issue(issues[-1])
-                    issues.append(Issue(issue_type, '', summary))
+                    new_issue = Issue(issue_type, '', summary)
+                    new_issue.explicit_parent = explicit_parent
+                    issues.append(new_issue)
 
         # Process final issue
         self.process_issue(issues[-1])
@@ -272,6 +290,14 @@ class MD2Jira:
         return issue_type
 
     def process_issue(self, issue):
+        if self.dry_run:
+            print("[dry-run] Would process: {} ({})".format(issue.summary, issue.type.name))
+            if issue.type is IssueType.Epic:
+                self.epic_id = 'DRY-RUN-EPIC'
+            if issue.type is IssueType.Task:
+                self.parent_id = 'DRY-RUN-TASK'
+            return
+
         remote_issue = self.find_issue(issue)
         if remote_issue != None:
             if remote_issue.type is IssueType.Epic:
@@ -299,8 +325,9 @@ class MD2Jira:
             # cleared, etc.), compare against the remote issue directly.
             issue_changed = self.diff_issue_against_remote(issue, remote_issue)
             if issue_changed is True:
-                issue_data = self.prepare_issue(issue, updating=True)
-                self.update_issue(issue, issue_data)
+                issue_data = self.prepare_issue(issue, updating=True, remote_issue=remote_issue)
+                if issue_data is not None:
+                    self.update_issue(issue, issue_data)
                 self.update_issue_cache(issue)
             else:
                 # Content matches remote -- seed the cache so future runs
@@ -308,7 +335,6 @@ class MD2Jira:
                 self.update_issue_cache(issue)
                 print("{}: \"{}\" up to date, skipping".format(issue.key, issue.summary))
         else:
-            # TODO: Create new issues
             issue_data   = self.prepare_issue(issue)
             create_issue = self.create_issue(issue, issue_data)
 
@@ -317,7 +343,6 @@ class MD2Jira:
                     self.epic_id   = create_issue.key
                 if create_issue is not None and create_issue.type is IssueType.Task:
                     self.parent_id = create_issue.key
-                # * Update issue cache
                 self.update_issue_cache(create_issue)
             else:
                 print('ERROR: unable to create "{}"'.format(issue.summary))
@@ -348,6 +373,18 @@ class MD2Jira:
         if local_cl != remote_cl:
             changes.append('checklist')
 
+        explicit_parent = getattr(issue, 'explicit_parent', None)
+        if issue.type is IssueType.Task:
+            desired_epic = explicit_parent or self.epic_id
+            current_epic = getattr(remote_issue, 'epic_id', None) or ''
+            if desired_epic and desired_epic != current_epic:
+                changes.append('epic_link')
+        elif issue.type is IssueType.Subtask:
+            desired_parent = explicit_parent or self.parent_id
+            current_parent = getattr(remote_issue, 'parent_id', None) or ''
+            if desired_parent and desired_parent != current_parent:
+                changes.append('parent')
+
         if changes and self.verbose:
             print("  [diff] {} changed: {}".format(
                 issue.key or issue.summary, ', '.join(changes)))
@@ -377,21 +414,59 @@ class MD2Jira:
                 prev_blank = False
         return '\n'.join(normalised)
 
-    def prepare_issue(self, issue, updating=False):
-        """Prepare JSON data to send to JIRA API"""
-        project_key = self.PROJECT_KEY
+    def prepare_issue(self, issue, updating=False, remote_issue=None):
+        """Prepare JSON data to send to JIRA API.
 
-        # Account for dash i.e '-' character in "Sub-task"
+        When updating with a remote_issue, produces a minimal diff payload
+        containing only fields that actually changed.  Returns None if
+        updating and no managed fields differ.
+        """
+        cfg = self.config.project
+        explicit_parent = getattr(issue, 'explicit_parent', None)
+
+        if updating and remote_issue:
+            fields = {}
+
+            if issue.summary != remote_issue.summary:
+                fields['summary'] = issue.summary
+
+            local_desc = issue.description.strip()
+            remote_desc = self._normalise_for_compare(remote_issue.description or '')
+            if self._normalise_for_compare(local_desc) != remote_desc:
+                fields['description'] = local_desc
+
+            if self.checklist_enabled and hasattr(issue, 'checklist') and len(issue.checklist.items) > 0:
+                local_cl = (issue.checklist.text or '').strip()
+                remote_cl = (remote_issue.checklist.text or '').strip()
+                if local_cl != remote_cl:
+                    fields[self.checklist_custom_field] = self.format_checklist(issue.checklist)
+
+            if issue.type is IssueType.Task:
+                desired_epic = explicit_parent or self.epic_id
+                remote_epic = getattr(remote_issue, 'epic_id', None) or ''
+                if desired_epic and desired_epic != remote_epic:
+                    fields[cfg.epic_link_field] = desired_epic
+            elif issue.type is IssueType.Subtask:
+                desired_parent = explicit_parent or self.parent_id
+                remote_parent = getattr(remote_issue, 'parent_id', None) or ''
+                if desired_parent and desired_parent != remote_parent:
+                    fields[cfg.parent_field] = {'key': desired_parent}
+
+            if not fields:
+                return None
+            return json.dumps({'fields': fields})
+
+        # Full payload for issue creation
+        project_key = self.PROJECT_KEY
         issue_type = 'Sub-Task' if issue.type is IssueType.Subtask else issue.type.name
 
-        out_json    = {
+        out_json = {
             'fields': {
                 'project': {
                     'key': project_key
                 },
                 'summary': issue.summary,
                 'description': issue.description.strip(),
-                #'components': [{"name": "App Services"}],
                 'issuetype': {
                     'name': issue_type
                 }
@@ -399,17 +474,21 @@ class MD2Jira:
         }
 
         if issue.type is IssueType.Epic:
-            out_json['fields']['customfield_10011'] = issue.summary
-        if issue.type is IssueType.Task and len(self.epic_id) > 0:
-            out_json['fields']['customfield_10014'] = self.epic_id
-        if issue.type is IssueType.Subtask and len(self.parent_id) > 0:
-            out_json['fields']['parent'] = {
-                'key': self.parent_id
-            }
+            out_json['fields'][cfg.epic_name_field] = issue.summary
 
-        if not updating and self.wba_team:
-            out_json['fields']['customfield_10032'] = {
-                'value': self.wba_team
+        if issue.type is IssueType.Task:
+            link_key = explicit_parent or self.epic_id
+            if link_key:
+                out_json['fields'][cfg.epic_link_field] = link_key
+
+        if issue.type is IssueType.Subtask:
+            parent_key = explicit_parent or self.parent_id
+            if parent_key:
+                out_json['fields'][cfg.parent_field] = {'key': parent_key}
+
+        if cfg.team_field and cfg.team_value:
+            out_json['fields'][cfg.team_field] = {
+                'value': cfg.team_value
             }
 
         if hasattr(issue, 'checklist') and len(issue.checklist.items) > 0:
@@ -521,17 +600,34 @@ class MD2Jira:
         return output
 
     def generate_issue_hash(self, issue): 
-        str    = '{}:{}:{}'.format(issue.summary, issue.description.strip(), issue.checklist.text.strip())
-        result = hashlib.md5(str.encode())
+        explicit_parent = getattr(issue, 'explicit_parent', None) or ''
+        parent_ctx = explicit_parent
+        if not parent_ctx:
+            if issue.type is IssueType.Task:
+                parent_ctx = self.epic_id
+            elif issue.type is IssueType.Subtask:
+                parent_ctx = self.parent_id
+            else:
+                parent_ctx = ''
+        hash_input = '{}:{}:{}:{}'.format(
+            issue.summary, issue.description.strip(),
+            issue.checklist.text.strip(), parent_ctx
+        )
+        result = hashlib.md5(hash_input.encode())
         return result.hexdigest()
+
+    @property
+    def cache_file(self):
+        subdomain = self.config.instance.subdomain or 'default'
+        project = self.PROJECT_KEY or 'default'
+        return f'.md2jira_cache_{subdomain}_{project}.tsv'
 
     def check_issue_cache_hash(self, issue_key, issue_hash):
         result = False
-        cache_file = '.md2jira_cache.py.tsv'
-        if os.path.exists(cache_file) is False:
-            open(cache_file, 'a', encoding='utf-8').close()
+        if os.path.exists(self.cache_file) is False:
+            open(self.cache_file, 'a', encoding='utf-8').close()
 
-        with open(cache_file, 'r', encoding='utf-8') as fh:
+        with open(self.cache_file, 'r', encoding='utf-8') as fh:
             for line in fh:
                 key, summary, hash = '{}'.format(line.rstrip()).split('\t')
                 if key == issue_key: 
@@ -541,17 +637,15 @@ class MD2Jira:
     def update_issue_cache(self, issue): 
         hash = self.generate_issue_hash(issue)
         if self.check_issue_cache_hash(issue.key, hash) is False:
-            # Temp file
             tmpfile = tempfile.NamedTemporaryFile(delete=False)
-            # Write everything _but_ changed issue out
-            with open('.md2jira_cache.py.tsv', 'r') as fh:
+            with open(self.cache_file, 'r') as fh:
                 for line in fh:
                     if line.startswith(issue.key) is False:
                         tmpfile.write(bytes(line,'utf-8'))
 
                 fields = [issue.key, '"{}"'.format(issue.summary), hash]
                 tmpfile.write(bytes('{}\n'.format('\t'.join(fields)), 'utf-8'))
-                shutil.copyfile(tmpfile.name, '{}/{}'.format(os.getcwd(), '.md2jira_cache.py.tsv'))
+                shutil.copyfile(tmpfile.name, '{}/{}'.format(os.getcwd(), self.cache_file))
 
 class Issue:
     def __init__(self, type, key='', summary='', description='', checklist_text=''):
@@ -561,10 +655,11 @@ class Issue:
         self.description    = description and description.strip()
         self.checklist      = Checklist(checklist_text)
         self.checklist_re   = re.compile(r'^.*\* \[(.*)\] (.*)$')
-        self.epic_id        = None
-        self.parent_id      = None
-        self.priority       = None
-        self.assignee       = None
+        self.epic_id          = None
+        self.parent_id        = None
+        self.explicit_parent  = None
+        self.priority         = None
+        self.assignee         = None
 
         if checklist_text is None:
             checklist_text = ''

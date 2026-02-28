@@ -4,22 +4,26 @@ from urllib.parse import urlencode, quote
 import argparse
 import time
 from src.md2jira import MD2Jira, Issue, IssueType
+from src.config import load_config
 
 import os
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Global test state - these tests must run in order
-pytest.args = argparse.ArgumentParser()
-pytest.args.INFILE = 'example.md'
-pytest.args.JIRA_PROJECT_KEY = os.environ.get('JIRA_PROJECT_KEY')
+pytest.args = argparse.Namespace(
+    INFILE='example.md',
+    JIRA_PROJECT_KEY=os.environ.get('JIRA_PROJECT_KEY'),
+    instance=None, config=None, epic=None, parent=None,
+    verbose=False, dry_run=False,
+)
 pytest.issue = Issue(IssueType.Epic, '', 'holy, bagumba!', 'description has `TEST`')
 pytest.updated_description = 'updated description with `another formatting challenge`'
 
 
 class TestMD2JIRA:
     def test_create(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = pytest.issue
         issue_data = md2jira.prepare_issue(issue)
         result     = md2jira.create_issue(issue, issue_data)
@@ -32,7 +36,7 @@ class TestMD2JIRA:
         assert result.key != ''
 
     def test_update(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = pytest.issue
         issue.description = pytest.updated_description
         issue_data = md2jira.prepare_issue(issue)
@@ -46,7 +50,7 @@ class TestMD2JIRA:
         assert result.description == issue.description
 
     def test_read(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         result     = md2jira.read_issue(pytest.issue_key)
         assert result != None
         assert type(result) == Issue
@@ -57,7 +61,7 @@ class TestMD2JIRA:
         assert result.description == pytest.updated_description
 
     def test_find(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         
         # Give Jira time to index the updated issue (especially after update)
         time.sleep(2)
@@ -79,7 +83,7 @@ class TestMD2JIRA:
         assert pytest.updated_description in result.description
 
     def test_delete(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = Issue(IssueType.Epic, pytest.issue_key)
         result     = md2jira.delete_issue(issue)
         assert type(result) == urllib3.response.HTTPResponse

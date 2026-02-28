@@ -1,0 +1,44 @@
+# md2jira Multi-Instance Configuration
+#
+# Copy this file to .md2jira.toml (in your project root or home directory)
+# and update the values for your Jira instances and projects.
+#
+# Auth keys are referenced by environment variable name -- never store
+# secrets directly in this file.  Set the actual key in your .env or
+# shell environment:
+#
+#   export JIRA_AUTH_KEY="$(echo -n 'email:api_token' | base64)"
+#
+# Resolution order (highest wins):
+#   CLI flags  >  environment variables  >  this config file  >  defaults
+#
+# If only one instance is defined, it is selected automatically.
+# With multiple instances, use  md2jira -n <instance_name> ...
+
+# ─── Instance: primary ────────────────────────────────────────────────
+[instances.primary]
+subdomain    = "your-subdomain"          # https://<subdomain>.atlassian.net
+domain       = "atlassian.net"           # optional, defaults to atlassian.net
+auth_key_env = "JIRA_AUTH_KEY"           # env var holding Base64 auth key
+
+  # Per-project custom field mappings
+  [instances.primary.projects.MYPROJ]
+  epic_name_field = "customfield_10011"  # field that stores the Epic name
+  epic_link_field = "customfield_10014"  # field that links a Task to its Epic
+  team_field      = "customfield_10032"  # optional: team field ID
+  team_value      = "My Team"            # optional: team value for new issues
+  checklist_field = "customfield_12345"  # optional: checklist custom field ID
+  parent_field    = "parent"             # field for sub-task parent (default)
+
+  [instances.primary.projects.OTHER]
+  epic_name_field = "customfield_10011"
+  epic_link_field = "customfield_10014"
+
+# ─── Instance: secondary (example) ───────────────────────────────────
+# [instances.secondary]
+# subdomain    = "other-org"
+# auth_key_env = "JIRA_AUTH_KEY_SECONDARY"
+#
+#   [instances.secondary.projects.PROJ2]
+#   epic_name_field = "customfield_10088"
+#   epic_link_field = "customfield_10089"

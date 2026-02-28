@@ -1,6 +1,8 @@
 .env
 .cache/
+.md2jira.toml
 .md2jira_cache.py.tsv
+.md2jira_cache_*.tsv
 .python-version
 .vscode/
 PULL_REQUEST_TEMPLATE.md

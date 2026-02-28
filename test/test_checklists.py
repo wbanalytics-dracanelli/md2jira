@@ -3,13 +3,18 @@ import urllib3
 from urllib.parse import urlencode, quote
 import argparse
 from src.md2jira import Checklist, ChecklistItemStatus, MD2Jira, Issue, IssueType
+from src.config import load_config
 
 import os
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-pytest.args = argparse.ArgumentParser()
-pytest.args.JIRA_PROJECT_KEY = os.environ.get('JIRA_PROJECT_KEY')
+pytest.args = argparse.Namespace(
+    INFILE='example.md',
+    JIRA_PROJECT_KEY=os.environ.get('JIRA_PROJECT_KEY'),
+    instance=None, config=None, epic=None, parent=None,
+    verbose=False, dry_run=False,
+)
 pytest.issues = {}
 pytest.issues['test_checklists'] = Issue(
     IssueType.Task, 
@@ -21,7 +26,7 @@ pytest.issues['test_checklists'] = Issue(
 
 class TestMD2JIRA:
     def test_create(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = pytest.issues['test_checklists']
         issue_data = md2jira.prepare_issue(issue)
         result     = md2jira.create_issue(issue, issue_data)
@@ -34,7 +39,7 @@ class TestMD2JIRA:
         assert result.key != ''
 
     def test_read(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         result     = md2jira.read_issue(pytest.issues['test_checklists'].issue_key)
         assert result != None
         assert type(result) == Issue
@@ -62,7 +67,7 @@ class TestMD2JIRA:
             assert sum_done == 2
 
     def test_delete(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = Issue(IssueType.Task, pytest.issues['test_checklists'].issue_key)
         result     = md2jira.delete_issue(issue)
         assert type(result) == urllib3.response.HTTPResponse

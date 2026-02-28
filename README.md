@@ -66,6 +66,62 @@ The `-p` flag overrides the project key from `.env`:
 md2jira -i example.md -p OTHER_PROJECT
 ```
 
+### Multi-Instance Support
+
+md2jira supports multiple Jira instances via an optional `.md2jira.toml` config file. Copy `.md2jira.toml.example` to `.md2jira.toml` and configure your instances and per-project custom fields.
+
+```bash
+# Select a specific instance (required when multiple are configured):
+md2jira -i example.md -n my_instance
+
+# Use a custom config file path:
+md2jira -i example.md -c /path/to/.md2jira.toml
+```
+
+If only one instance is configured, it is selected automatically. Without a `.md2jira.toml`, md2jira falls back to `.env` variables (fully backward-compatible).
+
+### Parent Issue Assignment
+
+You can attach issues to existing epics or stories:
+
+```bash
+# Set a parent epic for all H2 (Task) issues in this run:
+md2jira -i example.md -e PROJ-100
+
+# Set a parent for all H3 (Sub-task) issues:
+md2jira -i example.md --parent PROJ-200
+```
+
+You can also specify parents per-issue inline in the markdown:
+
+```markdown
+## My Story {parent:EPIC-123}
+### My Sub-task {parent:STORY-456}
+```
+
+Inline `{parent:KEY}` annotations override the CLI flags for that specific issue. The annotation is stripped from the issue summary before creating/updating.
+
+### Dry Run
+
+Preview what md2jira would do without making any API calls:
+
+```bash
+md2jira -i example.md -d
+```
+
+### All CLI Options
+
+| Flag | Description |
+|------|-------------|
+| `-i FILE` | Input markdown file (required) |
+| `-p KEY` | Override project key |
+| `-n NAME` | Select Jira instance from `.md2jira.toml` |
+| `-c PATH` | Path to config file |
+| `-e KEY` | Parent epic key for all H2 issues |
+| `--parent KEY` | Parent key for all H3 issues |
+| `-d` / `--dry-run` | Preview changes without API calls |
+| `-v` / `--verbose` | Show diff details during update detection |
+
 ## Markdown Format
 
 Header levels map to Jira issue types:
