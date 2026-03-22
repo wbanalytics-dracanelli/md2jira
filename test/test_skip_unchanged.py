@@ -10,13 +10,11 @@ They verify that:
   - Description normalisation handles whitespace edge-cases
 """
 
-import argparse
 import os
-import tempfile
-import shutil
 import pytest
 from unittest.mock import patch, MagicMock
 
+from src.config import MD2JiraConfig, JiraInstanceConfig, JiraProjectConfig
 from src.md2jira import MD2Jira, Issue, IssueType
 
 
@@ -24,27 +22,27 @@ from src.md2jira import MD2Jira, Issue, IssueType
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_args(**overrides):
-    """Build a minimal args namespace for MD2Jira."""
-    defaults = {
-        'INFILE': 'example.md',
-        'JIRA_PROJECT_KEY': 'TEST',
-        'verbose': False,
-    }
+def _make_config(**overrides):
+    defaults = dict(
+        instance=JiraInstanceConfig(subdomain='fake', domain='atlassian.net'),
+        project=JiraProjectConfig(project_key='TEST'),
+        infile='example.md',
+        verbose=False,
+        dry_run=False,
+        default_epic_key=None,
+        default_parent_key=None,
+    )
     defaults.update(overrides)
-    return argparse.Namespace(**defaults)
+    return MD2JiraConfig(**defaults)
 
 
-def _make_md2jira(**arg_overrides):
+def _make_md2jira(**config_overrides):
     """Instantiate MD2Jira with env vars stubbed out."""
     env = {
-        'JIRA_PROJECT_SUBDOMAIN': 'fake',
-        'JIRA_DOMAIN': 'atlassian.net',
         'JIRA_AUTH_KEY': 'dW5zZXQ6dW5zZXQ=',
-        'JIRA_PROJECT_KEY': 'TEST',
     }
     with patch.dict(os.environ, env, clear=False):
-        return MD2Jira(_make_args(**arg_overrides))
+        return MD2Jira(_make_config(**config_overrides))
 
 
 # ---------------------------------------------------------------------------

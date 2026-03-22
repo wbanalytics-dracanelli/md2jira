@@ -113,6 +113,19 @@ The md2jira tool creates JIRA issues based on Markdown header levels:
 - **H2 (`##`)**: Creates a Story (linked to the preceding Epic)
 - **H3 (`###`)**: Creates a Sub-task (linked to the preceding Story)
 
+### Explicit Parent Assignment
+
+Issues can be linked to existing Epics, Stories, or Tasks using the `{parent:KEY}` annotation at the end of a header line. The annotation is stripped from the issue summary.
+
+```markdown
+## Story Title {parent:EPIC-123}
+### Sub-task Title {parent:STORY-456}
+```
+
+Without explicit parents, the default sequential behavior applies (each H2 links to the preceding H1, each H3 links to the preceding H2).
+
+CLI flags `--epic` / `-e` and `--parent` can also set default parents for all H2 and H3 issues respectively.
+
 ### Example Structure
 
 ```markdown
@@ -140,6 +153,14 @@ Story description...
 
 Sub-task details...
 ```
+
+## Multi-Instance Configuration
+
+md2jira supports multiple Jira instances via an optional `.md2jira.toml` config file. Each instance can define multiple projects with independent custom field mappings.
+
+See `.md2jira.toml.example` for the full schema. When a config file is present, select an instance with `-n <name>`. Custom field IDs (epic name, epic link, team, checklist, parent) are configured per project within each instance.
+
+Without a config file, md2jira falls back to `.env` environment variables (fully backward-compatible).
 
 ## Content Guidelines
 

@@ -3,21 +3,25 @@ import urllib3
 from urllib.parse import urlencode, quote
 import argparse
 from src.md2jira import MD2Jira, Issue, IssueType
+from src.config import load_config
 
 import os
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-pytest.args = argparse.ArgumentParser()
-pytest.args.INFILE = 'example.md'
-pytest.args.JIRA_PROJECT_KEY = os.environ.get('JIRA_PROJECT_KEY')
+pytest.args = argparse.Namespace(
+    INFILE='example.md',
+    JIRA_PROJECT_KEY=os.environ.get('JIRA_PROJECT_KEY'),
+    instance=None, config=None, epic=None, parent=None,
+    verbose=False, dry_run=False,
+)
 pytest.issue_epic    = Issue(IssueType.Epic, '', 'Epic Test 001', 'description has `TEST`')
 pytest.issue_task    = Issue(IssueType.Task, '', 'Task Test 001', 'description has `TEST`')
 pytest.issue_subtask = Issue(IssueType.Subtask, '', 'Subtask Test 001', 'description has `TEST`')
 
 class TestMD2JIRA:
     def test_create_epic(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = pytest.issue_epic
         issue_data = md2jira.prepare_issue(issue)
         result     = md2jira.create_issue(issue, issue_data)
@@ -30,7 +34,7 @@ class TestMD2JIRA:
         assert result.key != ''
 
     def test_create_task(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = pytest.issue_task
 
         md2jira.epic_id = pytest.epic_issue_key
@@ -51,7 +55,7 @@ class TestMD2JIRA:
         assert result.epic_id == issue.epic_id
 
     def test_create_subtask(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = pytest.issue_subtask
 
         md2jira.parent_id = pytest.task_issue_key
@@ -70,7 +74,7 @@ class TestMD2JIRA:
         assert result.parent_id == issue.parent_id
 
     def test_delete_subtask(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = Issue(IssueType.Story, pytest.subtask_issue_key)
         result     = md2jira.delete_issue(issue)
         assert type(result) == urllib3.response.HTTPResponse
@@ -78,7 +82,7 @@ class TestMD2JIRA:
         assert result.status == 204
 
     def test_delete_task(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = Issue(IssueType.Task, pytest.task_issue_key)
         result     = md2jira.delete_issue(issue)
         assert type(result) == urllib3.response.HTTPResponse
@@ -86,7 +90,7 @@ class TestMD2JIRA:
         assert result.status == 204
 
     def test_delete_epic(self):
-        md2jira    = MD2Jira(pytest.args)
+        md2jira    = MD2Jira(load_config(pytest.args))
         issue      = Issue(IssueType.Epic, pytest.epic_issue_key)
         result     = md2jira.delete_issue(issue)
         assert type(result) == urllib3.response.HTTPResponse
