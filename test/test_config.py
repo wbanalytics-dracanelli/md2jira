@@ -33,6 +33,7 @@ def _make_args(**overrides):
         'parent': None,
         'verbose': False,
         'dry_run': False,
+        'use_task_type': False,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -50,6 +51,9 @@ auth_key_env = "MY_AUTH_KEY"
   team_field = "customfield_99003"
   team_value = "Alpha Team"
   checklist_field = "customfield_99004"
+
+  [instances.myorg.projects.TSK]
+  h2_issue_type = "Task"
 """
 
 MULTI_INSTANCE_TOML = b"""
@@ -250,3 +254,59 @@ class TestLoadConfigCLIFlags:
             config = load_config(_make_args(verbose=True))
 
         assert config.verbose is True
+
+
+class TestH2IssueType:
+    """Resolution of the H2 (##) Jira issue type: CLI > TOML > 'Story'."""
+
+    @patch('src.config.load_dotenv')
+    def test_defaults_to_story(self, mock_dotenv, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        env = {'JIRA_PROJECT_SUBDOMAIN': 'x', 'JIRA_AUTH_KEY': 'x'}
+        with patch.dict(os.environ, env, clear=False):
+            config = load_config(_make_args())
+
+        assert config.project.h2_issue_type == 'Story'
+
+    @patch('src.config.load_dotenv')
+    def test_task_flag_forces_task(self, mock_dotenv, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        env = {'JIRA_PROJECT_SUBDOMAIN': 'x', 'JIRA_AUTH_KEY': 'x'}
+        with patch.dict(os.environ, env, clear=False):
+            config = load_config(_make_args(use_task_type=True))
+
+        assert config.project.h2_issue_type == 'Task'
+
+    def test_toml_sets_task(self, tmp_path, monkeypatch):
+        cfg_file = tmp_path / ".md2jira.toml"
+        cfg_file.write_bytes(SINGLE_INSTANCE_TOML)
+        monkeypatch.chdir(tmp_path)
+
+        env = {'MY_AUTH_KEY': 'test'}
+        with patch.dict(os.environ, env, clear=False):
+            config = load_config(_make_args(JIRA_PROJECT_KEY='TSK'))
+
+        assert config.project.h2_issue_type == 'Task'
+
+    def test_cli_flag_overrides_toml(self, tmp_path, monkeypatch):
+        """A project with no h2_issue_type defaults to Story, but --task wins."""
+        cfg_file = tmp_path / ".md2jira.toml"
+        cfg_file.write_bytes(SINGLE_INSTANCE_TOML)
+        monkeypatch.chdir(tmp_path)
+
+        env = {'MY_AUTH_KEY': 'test'}
+        with patch.dict(os.environ, env, clear=False):
+            config = load_config(_make_args(JIRA_PROJECT_KEY='ABC', use_task_type=True))
+
+        assert config.project.h2_issue_type == 'Task'
+
+    def test_toml_project_without_setting_defaults_story(self, tmp_path, monkeypatch):
+        cfg_file = tmp_path / ".md2jira.toml"
+        cfg_file.write_bytes(SINGLE_INSTANCE_TOML)
+        monkeypatch.chdir(tmp_path)
+
+        env = {'MY_AUTH_KEY': 'test'}
+        with patch.dict(os.environ, env, clear=False):
+            config = load_config(_make_args(JIRA_PROJECT_KEY='ABC'))
+
+        assert config.project.h2_issue_type == 'Story'

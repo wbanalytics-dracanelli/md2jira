@@ -32,6 +32,7 @@ class MD2Jira:
         self.epic_id      = config.default_epic_key or ''
         self.parent_id    = config.default_parent_key or ''
 
+        self.h2_issue_type          = config.project.h2_issue_type
         self.checklist_custom_field = config.project.checklist_field
         self.checklist_enabled      = self.checklist_custom_field is not None
         self.verbose                = config.verbose
@@ -172,19 +173,20 @@ class MD2Jira:
             # More robust issue type mapping
             issue_type_name = fields['issuetype']['name']
             issue_type_clean = issue_type_name.replace('-','').replace(' ', '')
-            
-            # Try to find the matching IssueType
-            try:
-                issue_type = IssueType.__dict__[issue_type_clean]
-            except KeyError:
-                # Fallback for common mappings
-                type_mapping = {
-                    'SubTask': IssueType.Subtask,
-                    'Task': IssueType.Task,
-                    'Epic': IssueType.Epic,
-                    'Story': IssueType.Story
-                }
-                issue_type = type_mapping.get(issue_type_clean, IssueType.Task)
+
+            # Normalise remote types onto the internal hierarchy markers.
+            # H2 items may be created as either "Story" or "Task" in Jira, but
+            # internally both map to IssueType.Task so that epic-linking,
+            # parent_id tracking, diffing, and cache hashing treat them
+            # uniformly on update runs.
+            type_mapping = {
+                'SubTask': IssueType.Subtask,
+                'Subtask': IssueType.Subtask,
+                'Task': IssueType.Task,
+                'Story': IssueType.Task,
+                'Epic': IssueType.Epic,
+            }
+            issue_type = type_mapping.get(issue_type_clean, IssueType.Task)
             
             # Handle description field -- API v3 returns Atlassian Document
             # Format (ADF), a nested JSON dict, instead of wiki-markup text.
@@ -315,7 +317,8 @@ class MD2Jira:
 
     def process_issue(self, issue):
         if self.dry_run:
-            print("[dry-run] Would process: {} ({})".format(issue.summary, issue.type.name))
+            display_type = self.h2_issue_type if issue.type is IssueType.Task else issue.type.name
+            print("[dry-run] Would process: {} ({})".format(issue.summary, display_type))
             if issue.type is IssueType.Epic:
                 self.epic_id = 'DRY-RUN-EPIC'
             if issue.type is IssueType.Task:
@@ -482,7 +485,12 @@ class MD2Jira:
 
         # Full payload for issue creation
         project_key = self.PROJECT_KEY
-        issue_type = 'Sub-task' if issue.type is IssueType.Subtask else issue.type.name
+        if issue.type is IssueType.Subtask:
+            issue_type = 'Sub-task'
+        elif issue.type is IssueType.Task:
+            issue_type = self.h2_issue_type
+        else:
+            issue_type = issue.type.name
 
         out_json = {
             'fields': {

@@ -25,6 +25,7 @@ class JiraProjectConfig:
     team_value: str | None = None
     checklist_field: str | None = None
     parent_field: str = "parent"
+    h2_issue_type: str = "Story"
 
 
 @dataclass
@@ -137,6 +138,13 @@ def load_config(args) -> MD2JiraConfig:
     if team_value and not team_field:
         team_field = "customfield_10032"
 
+    # H2 (##) Jira issue type: CLI --task flag forces "Task"; otherwise use
+    # the per-project TOML value or the built-in "Story" default.
+    if getattr(args, 'use_task_type', False):
+        h2_issue_type = "Task"
+    else:
+        h2_issue_type = project_data.get("h2_issue_type") or "Story"
+
     project_config = JiraProjectConfig(
         project_key=project_key,
         epic_name_field=project_data.get("epic_name_field", "customfield_10011"),
@@ -145,6 +153,7 @@ def load_config(args) -> MD2JiraConfig:
         team_value=team_value,
         checklist_field=checklist_field,
         parent_field=project_data.get("parent_field", "parent"),
+        h2_issue_type=h2_issue_type,
     )
 
     return MD2JiraConfig(

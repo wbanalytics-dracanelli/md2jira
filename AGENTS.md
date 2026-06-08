@@ -129,8 +129,25 @@ _italic text_
 The md2jira tool creates JIRA issues based on Markdown header levels:
 
 - **H1 (`#`)**: Creates an Epic
-- **H2 (`##`)**: Creates a Story (linked to the preceding Epic)
+- **H2 (`##`)**: Creates a Story by default (linked to the preceding Epic)
 - **H3 (`###`)**: Creates a Sub-task (linked to the preceding Story)
+
+### H2 Issue Type: Story (default) vs. Task
+
+By default, `##` headers create JIRA **Story** issues. To create **Task** issues
+instead, pass the `--task` / `-t` flag:
+
+```bash
+python main.py -i tickets.md -p PROJ --task   # H2 items become Tasks
+python main.py -i tickets.md -p PROJ          # H2 items become Stories (default)
+```
+
+The H2 issue type can also be set per project in `.md2jira.toml` via the
+`h2_issue_type` key (e.g. `h2_issue_type = "Task"`). The CLI `--task` flag takes
+precedence over the TOML value, which in turn overrides the built-in `Story`
+default. Regardless of the chosen JIRA type, H2 items are tracked internally as
+the same hierarchy level, so epic-linking and update detection behave
+identically.
 
 ### Explicit Parent Assignment
 

@@ -36,6 +36,12 @@ parser.add_argument('--parent',
     help='Parent key for all H3 issues (e.g. PROJ-456)',
     type=str
 )
+parser.add_argument('-t', '--task',
+    dest='use_task_type',
+    action='store_true',
+    default=False,
+    help='Create H2 (##) items as Jira "Task" issues instead of the default "Story"'
+)
 parser.add_argument('-d', '--dry-run',
     dest='dry_run',
     action='store_true',
