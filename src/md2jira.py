@@ -26,6 +26,9 @@ class MD2Jira:
         self.subtask_re   = re.compile(r'^###\s+')
         self.checklist_re = re.compile(r'^\* \[(.*)\] (.*)$')
         self.parent_re    = re.compile(r'\s*\{parent:([A-Za-z]+-\d+)\}\s*$')
+        self.fence_re     = re.compile(r'^```(\w*)\s*$')
+        self.inline_code_re = re.compile(r'`([^`]+)`')
+        self.in_code_fence  = False
         self.epic_id      = config.default_epic_key or ''
         self.parent_id    = config.default_parent_key or ''
 
@@ -230,6 +233,27 @@ class MD2Jira:
 
         for line in lines:
             stripped   = line.strip()
+
+            # Handle Markdown fenced code blocks. JIRA has no triple-backtick
+            # syntax, so opening fences become {code:lang} / {code} and inner
+            # lines are appended verbatim (no issue detection or inline
+            # conversion) until the closing fence.
+            fence_match = self.fence_re.match(stripped)
+            if fence_match:
+                if self.in_code_fence:
+                    self.in_code_fence = False
+                    issues[-1].description += '{code}\n'
+                else:
+                    self.in_code_fence = True
+                    lang = fence_match.group(1)
+                    open_tag = '{{code:{}}}'.format(lang) if lang else '{code}'
+                    issues[-1].description += '{}\n'.format(open_tag)
+                continue
+
+            if self.in_code_fence:
+                issues[-1].description += '{}\n'.format(line.rstrip('\n'))
+                continue
+
             issue_type = self.detect_issue(stripped)
             explicit_parent = None
 
@@ -458,7 +482,7 @@ class MD2Jira:
 
         # Full payload for issue creation
         project_key = self.PROJECT_KEY
-        issue_type = 'Sub-Task' if issue.type is IssueType.Subtask else issue.type.name
+        issue_type = 'Sub-task' if issue.type is IssueType.Subtask else issue.type.name
 
         out_json = {
             'fields': {
@@ -552,6 +576,11 @@ class MD2Jira:
             matches = re.match(_match, _str)
             if matches is not None:
                 _str = _pattern.sub(_replacement, _str)
+
+        # Convert Markdown inline code (`text`) to JIRA monospace ({{text}}).
+        # JIRA wiki markup renders backticks literally, so without this the
+        # backtick characters show up verbatim in the rendered issue.
+        _str = self.inline_code_re.sub(r'{{\1}}', _str)
 
         return _str
 

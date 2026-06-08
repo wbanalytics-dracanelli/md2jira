@@ -67,6 +67,23 @@ SELECT * FROM users;
 {code}
 ```
 
+### Inline Code
+
+For inline code spans, JIRA uses monospace syntax `{{...}}` (double curly
+braces), NOT Markdown backticks. JIRA wiki markup renders single backticks
+literally, so `` `foo` `` shows up with visible backtick characters.
+
+md2jira now auto-converts Markdown inline code to monospace, so either form is
+accepted in source files:
+
+```markdown
+Use the `foo` helper.     → converted to {{foo}}
+Use the {{foo}} helper.   → already JIRA-native, passes through unchanged
+```
+
+Writing `{{...}}` directly is the most explicit and renders correctly even if
+the conversion is ever disabled.
+
 ### Checklists
 
 Use checkbox syntax for checklists within issues:
@@ -78,6 +95,8 @@ Use checkbox syntax for checklists within issues:
 ```
 
 **Note:** Do NOT add `h3. Checklist` headers before checklists. The checkbox formatting alone creates the checklist in JIRA.
+
+**Instance-specific note:** The `wbagora` Jira instance does NOT have the Checklist plugin. For tickets targeting wbagora (project prefixes: ES), always use plain bulleted lists (`* item`) instead of checkbox syntax (`* [ ] item`).
 
 ### Tables
 
@@ -206,19 +225,36 @@ h3. Checklist   ← Not needed; checkboxes create the checklist automatically
 ### h3. Section Title   ← Don't mix; use one or the other
 ```
 
-### 4. Using Markdown Code Blocks ❌
+### 4. Using Markdown Code Blocks (now auto-converted)
 ```markdown
-\`\`\`python          ← Use JIRA syntax instead
+\`\`\`python          ← Auto-converted to {code:python}
 code here
 \`\`\`
 ```
 
-Should be:
+Becomes:
 ```markdown
 {code:python}
 code here
 {code}
 ```
+
+md2jira now converts Markdown fenced blocks to `{code:lang}` automatically, but
+writing JIRA syntax directly is still preferred for clarity.
+
+### 5. Using Markdown Inline Backticks (now auto-converted)
+```markdown
+Use the `foo` helper.   ← Auto-converted to {{foo}}
+```
+
+Becomes:
+```markdown
+Use the {{foo}} helper.
+```
+
+Single backticks render literally in JIRA, so without conversion they appear as
+visible backtick characters. md2jira now converts `` `text` `` to `{{text}}`,
+but writing `{{text}}` directly is preferred.
 
 ## Pre-Creation Checklist
 
@@ -226,7 +262,8 @@ Before creating or modifying md2jira Markdown files, verify:
 
 - [ ] All headers use correct levels (# for Epic, ## for Story, ### for Sub-task)
 - [ ] No `#` symbols used for list items
-- [ ] Code blocks use `{code:language}` syntax, not backticks
+- [ ] Code blocks use `{code:language}` syntax (Markdown fences are auto-converted)
+- [ ] Inline code uses `{{...}}` monospace (Markdown backticks are auto-converted)
 - [ ] Checklists use `* [ ]`, `* [>]`, `* [x]` without extra headers
 - [ ] Links use `[text|url]` JIRA syntax
 - [ ] Section headers within issues use `h3.` prefix
